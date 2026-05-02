@@ -4,6 +4,7 @@
 #include <math.h>
 #include "gaussian.h"
 #include "canny.h"
+#include "laws_texture.h"
 #include <stdio.h>
 
 int main(int argc, const char * argv[]) {
@@ -45,7 +46,23 @@ int main(int argc, const char * argv[]) {
               deleteImage(outputImage);
               deleteMatrix(inputMatrix);
               deleteMatrix(canny);
-       } else {
+       } 
+       
+       // Usage: ./main laws_texture input_path output_path
+       // Will create folder in output_path "laws_texture" containing 25 images for each of the 25 Laws' texture energy maps
+       else if (strcmp(argv[1], "laws_texture") == 0) {
+              if (argc != 4) {
+                     fprintf(stderr, "Usage: %s laws_texture input_image.ppm output_image_prefix\n", argv[0]);
+                     return 1;
+              }
+              Image inputImage = readImage((char *)argv[2]);
+              Matrix inputMatrix = image2Matrix(inputImage);
+              createLawsTextureEnergyMap(inputMatrix, (char *)argv[3]);
+              deleteImage(inputImage);
+              deleteMatrix(inputMatrix);
+       }
+       
+       else {
               fprintf(stderr, "Unknown filter: %s\n", argv[1]);
               return 1;
        }
