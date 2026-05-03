@@ -84,7 +84,7 @@ int main(int argc, const char * argv[]) {
        }
        
        // Usage: ./main hough input_path output_path g_size g_sigma canny_low canny_high r_min r_max vote_threshold
-       } else if (strcmp(argv[1], "hough") == 0) {
+       else if (strcmp(argv[1], "hough") == 0) {
               if (argc != 11) {
                      fprintf(stderr, "Usage: %s hough input_image.ppm output_image.ppm g_size g_sigma canny_low canny_high r_min r_max arc_pct\n"
                                      "  arc_pct: minimum %% of circle circumference that must be an edge (0-100)\n", argv[0]);
@@ -102,9 +102,10 @@ int main(int argc, const char * argv[]) {
               deleteMatrix(edges);
               deleteImage(inputImage);
               deleteImage(outputImage);
+       }
        
        // Usage: ./main better_coral_detector input_path output_path min_area max_area
-       } else if (strcmp(argv[1], "better_coral_detector") == 0) {
+       else if (strcmp(argv[1], "better_coral_detector") == 0) {
               if (argc != 6) {
                      fprintf(stderr, "Usage: %s better_coral_detector input_image.ppm output_image.ppm min_area max_area\n", argv[0]);
                      return 1;
