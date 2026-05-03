@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 char *make_output_path(const char *dir, const char *suffix) {
     size_t needed = strlen(dir) + 1 + strlen("LawsTexture") + 1 + strlen(suffix) + strlen(".ppm") + 1;
@@ -152,6 +153,90 @@ void createLawsTextureEnergyMap(Matrix input, char *outputPath) {
     Matrix W5S5Convolved = convolve(input, W5S5Matrix);
     Matrix W5R5Convolved = convolve(input, W5R5Matrix);
     Matrix W5W5Convolved = convolve(input, W5W5Matrix);
+
+    // Divide image into 8x8 patches and compute energy (sum of absolute values) for each patch
+    int patchSize = 8;
+    int numPatchesX = L5L5Convolved.width / patchSize;
+    int numPatchesY = L5L5Convolved.height / patchSize;
+    int rows = numPatchesY * numPatchesX;
+    int cols = 25;
+    
+    // initialize vectors to hold energy values for each patch and each mask
+    int **energyValue = (int **)malloc(rows * sizeof(int *));
+    for (int i = 0; i < rows; i++) {
+        energyValue[i] = (int *)malloc(cols * sizeof(int));
+    }
+
+    // Create feature vector for each patch (row) and each mask (column)
+    for (int y = 0; y < numPatchesY; y++) {
+        for (int x = 0; x < numPatchesX; x++) {
+            for (int j = 0; j < patchSize; j++) {
+                for (int i = 0; i < patchSize; i++) {
+                    int idxX = x * patchSize + i;
+                    int idxY = y * patchSize + j;
+                    energyValue[y * numPatchesX + x][0] += fabs(L5L5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][1] += fabs(L5E5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][2] += fabs(L5S5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][3] += fabs(L5R5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][4] += fabs(L5W5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][5] += fabs(E5L5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][6] += fabs(E5E5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][7] += fabs(E5S5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][8] += fabs(E5R5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][9] += fabs(E5W5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][10] += fabs(S5L5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][11] += fabs(S5E5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][12] += fabs(S5S5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][13] += fabs(S5R5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][14] += fabs(S5W5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][15] += fabs(R5L5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][16] += fabs(R5E5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][17] += fabs(R5S5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][18] += fabs(R5R5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][19] += fabs(R5W5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][20] += fabs(W5L5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][21] += fabs(W5E5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][22] += fabs(W5S5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][23] += fabs(W5R5Convolved.map[idxY][idxX]);
+                    energyValue[y * numPatchesX + x][24] += fabs(W5W5Convolved.map[idxY][idxX]);
+                }
+            }
+        }
+    }
+
+    // build CSV path (separate from make_output_path which makes .ppm)
+    size_t csvNeeded = strlen(outputPath) + 1 + strlen("LawsTexture") + 1 + strlen("energy_values") + strlen(".csv") + 1;
+    char *csvPath = malloc(csvNeeded);
+    if (csvPath) {
+        snprintf(csvPath, csvNeeded, "%s/%s_%s.csv", outputPath, "LawsTexture", "energy_values");
+    }
+    FILE *csvFile = csvPath ? fopen(csvPath, "w") : NULL;
+    if (csvFile) {
+        const char *headers[25] = {
+            "L5L5","L5E5","L5S5","L5R5","L5W5",
+            "E5L5","E5E5","E5S5","E5R5","E5W5",
+            "S5L5","S5E5","S5S5","S5R5","S5W5",
+            "R5L5","R5E5","R5S5","R5R5","R5W5",
+            "W5L5","W5E5","W5S5","W5R5","W5W5"
+        };
+
+        // header
+        fprintf(csvFile, "patch_id");
+        for (int h = 0; h < cols; h++) fprintf(csvFile, ",%s", headers[h]);
+        fputc('\n', csvFile);
+
+        // rows: first column = patch id
+        for (int r = 0; r < rows; r++) {
+            fprintf(csvFile, "%d", r);
+            for (int c = 0; c < cols; c++) {
+                fprintf(csvFile, ",%d", energyValue[r][c]);
+            }
+            fputc('\n', csvFile);
+        }
+        fclose(csvFile);
+    }
+    free(csvPath);
+
 
     // Convert matrices to images
     Image L5L5Image = matrix2Image(L5L5Convolved, 0, 1.0);
