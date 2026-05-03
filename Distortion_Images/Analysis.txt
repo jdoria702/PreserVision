@@ -1,0 +1,14 @@
+SAMPLE IMAGE SOURCE: https://github.com/opencv/opencv/tree/master/samples/data
+
+Images sourced:
+- https://github.com/opencv/opencv/blob/master/samples/data/butterfly.jpg
+- https://github.com/opencv/opencv/blob/master/samples/data/starry_night.jpg
+- https://github.com/opencv/opencv/blob/master/samples/data/notes.png
+
+We converted all sourced images to .ppm before use.
+
+These were the distortions applied:
+- Butterfly -> Low contrast distortion.
+- Starry Night -> Gaussian noise.
+- Notes -> Box blur.
+
