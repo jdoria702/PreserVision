@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "Laws_Texture_Images/laws_texture.h"
+#include "Texture_Segmentation_Images/texture_segmentation.h"
 #include <stdio.h>
 
 #include "Gaussian_Filter_Images/gaussian.h"
 #include "Canny_Filter_Images/canny.h"
-#include "laws_texture.h"
 #include "Hough_Transform_Images/hough.h"
 #include "irregular_shape_detector.h"
 #include "Distortion_Images/gaussian_noise.h"
@@ -55,18 +56,32 @@ int main(int argc, const char * argv[]) {
               deleteMatrix(canny);
        } 
        
-       // Usage: ./main laws_texture input_path output_path
-       // Will create folder in output_path "laws_texture" containing 25 images for each of the 25 Laws' texture energy maps
+       // Usage: ./main laws_texture input_path output_path patch_size
+       // Will create 25 images for each of the 25 Laws' texture energy maps
        else if (strcmp(argv[1], "laws_texture") == 0) {
-              if (argc != 4) {
-                     fprintf(stderr, "Usage: %s laws_texture input_image.ppm output_image_prefix\n", argv[0]);
+              if (argc != 5) {
+                     fprintf(stderr, "Usage: %s laws_texture input_image.ppm output_image_prefix patchSize\n", argv[0]);
                      return 1;
               }
               Image inputImage = readImage((char *)argv[2]);
               Matrix inputMatrix = image2Matrix(inputImage);
-              createLawsTextureEnergyMap(inputMatrix, (char *)argv[3]);
+              createLawsTextureEnergyMap(inputMatrix, (char *)argv[3], atoi(argv[4]));
               deleteImage(inputImage);
               deleteMatrix(inputMatrix);
+       }
+
+       // Usage ./main texture_segmentation input_image.ppm label_csv output_image.ppm patch_size
+       // Need to have run laws_texture first to generate the label_csv file (which contains patch_id and cluster label for each patch)
+       else if (strcmp(argv[1], "texture_segmentation") == 0) {
+              if (argc != 6) {
+                     fprintf(stderr, "Usage: %s texture_segmentation input_image.ppm label_csv output_image.ppm patchSize\n", argv[0]);
+                     return 1;
+              }
+              Image inputImage = readImage((char *)argv[2]);
+              segmentTexture(inputImage, (char *)argv[3], atoi(argv[5]));
+              writeImage(inputImage, (char *)argv[4]);
+              deleteImage(inputImage);
+       }
        
        // Usage: ./main hough input_path output_path g_size g_sigma canny_low canny_high r_min r_max vote_threshold
        } else if (strcmp(argv[1], "hough") == 0) {
