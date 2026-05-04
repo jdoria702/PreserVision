@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "Gaussian_Filter_Images/gaussian.h"
+#include "Sobel_Filter_Images/sobel.h"
 #include "Canny_Filter_Images/canny.h"
 #include "Hough_Transform_Images/hough.h"
 #include "irregular_shape_detector.h"
@@ -35,9 +36,19 @@ int main(int argc, const char * argv[]) {
 
        // Usage: ./main sobel input_path output_path
        else if (strcmp(argv[1], "sobel") == 0) {
-              fprintf(stderr, "Sobel filter not implemented yet.\n");
-              return 1;
-
+              if (argc != 4) {
+                     fprintf(stderr, "Usage: %s sobel input_image.ppm output_image.ppm\n", argv[0]);
+                     return 1;
+              }
+              Image inputImage = readImage((char *)argv[2]);
+              Matrix inputMatrix = image2Matrix(inputImage);
+              Matrix sobel = sobelEdgeDetection(inputMatrix);
+              Image outputImage = matrix2Image(sobel, 1, 1.0);
+              writeImage(outputImage, (char *)argv[3]);
+              deleteImage(inputImage);
+              deleteImage(outputImage);
+              deleteMatrix(inputMatrix);
+              deleteMatrix(sobel);
 
        // Usage: ./main canny input_path output_path low_threshold high_threshold
        } else if (strcmp(argv[1], "canny") == 0) {

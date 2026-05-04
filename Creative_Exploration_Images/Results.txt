@@ -928,7 +928,7 @@ Run #5:
 - if (density < 0.5 && (aspect > 3.0 || aspect < 0.5)) {
                 continue;
             }
-- minArea = 300, maxArea = 150000
+- minArea = 300, maxArea = 15000
 
 Results: better_coral_detector_5.ppm
 
