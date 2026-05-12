@@ -1,0 +1,192 @@
+================================================================================
+CREATIVE EXPLORATION — CORAL BLOB DETECTOR
+Analysis of Design Decisions
+================================================================================
+
+MOTIVATION
+--------------------------------------------------------------------------------
+After completing the Hough Transform pipeline, we were dissatisfied with its
+output. The Hough Circle Transform is a geometric shape detector — it only
+finds perfect circles. Coral fragments are organic, irregularly-shaped, and
+branching. No circle accurately describes their boundary, and the mesh grid in
+the coral nursery image produced clean circular arc segments (from the rounded
+mesh-cell corners) that the accumulator mistook for coral. We needed a different
+approach that did not assume any particular shape.
+
+Our new pipeline asks a simpler question: rather than "does this collection of
+edge pixels trace a circle?", we ask: "Is this cluster of dark pixels the right
+color, the right size, and the right shape to be a coral fragment?"
+
+================================================================================
+STAGE 1 — COLOR THRESHOLDING  (isCoralPixel)
+================================================================================
+
+Why we included it:
+    The coral nursery image has a clear visual pattern: the coral fragments
+    are noticeably darker than the water background and lighter mesh. They also
+    have a warm brownish cast. This color signature is a far more direct discriminator 
+    than edge shape, and so we skip edge detection entirely for this pipeline.
+
+What it does:
+    Converts each pixel to grayscale average (r+g+b)/3 and accepts it as a
+    coral candidate if:
+        (a) gray < 130  — it is dark enough to be coral
+        (b) r >= g >= b — the slight warm/brown tint is present
+        (c) saturation (max - min channel) <= 60 — excludes the brightly
+            colored identification tags attached to some coral pieces
+
+Why each condition:
+    - gray < 130: the mesh wires and water background are noticeably brighter;
+      130 was the threshold that captured coral body pixels while rejecting
+      most background.
+    - r >= g >= b: coral has more red than green and more green than blue,
+      producing the warm tone. Pure grays (shadows, mesh shadows) satisfy
+      gray < 130 but not this ordering, which helps reject them.
+    - saturation <= 60: the identification tag next to the coral pieces is
+      highly saturated (bright orange/yellow). Without this guard, the tag
+      would be included as coral.
+
+Output: a binary mask where 255 = candidate coral pixel, 0 = background.
+
+================================================================================
+STAGE 2 — MORPHOLOGICAL CLOSING  (dilate × 4, then erode × 4)
+================================================================================
+
+Why we included it:
+    The color threshold alone produces a broken mask. A single coral fragment
+    is not uniformly dark, as there highlights, internal texture variation,
+    and partial mesh shadow all create small gaps of non-coral pixels within
+    what is visually one piece of coral. Without closing these gaps, BFS in
+    the next stage would split one coral piece into many small disconnected
+    blobs, each too small to pass the area filter.
+
+What closing does:
+    Dilation (expand) first: grows every confirmed coral pixel outward by
+    one pixel in all 8 directions. Four rounds of this fills gaps up to
+    ~4 pixels wide, bridging the interior holes within a coral fragment.
+
+    Erosion (shrink) after: shrinks the expanded mask back inward by the
+    same amount. This restores the approximate original blob boundary while
+    keeping the internal gaps filled. Structures that were connected only
+    because of the dilation remain connected after erosion.
+
+The trade-off we accepted:
+    Four dilation rounds expand the mask 4 pixels in every direction. If a
+    coral pixel and a mesh strand pixel are within 4 pixels of each other,
+    dilation bridges them and they become one blob. The subsequent erosion
+    does not separate them. This is why some detected blobs may contain
+    both coral and adjacent mesh material. A smaller dilation radius (1–2
+    rounds) would reduce this fusion but would leave more internal coral
+    gaps unfilled.
+
+    Additionally, at mesh intersection nodes — where two strands cross and
+    form a squarish dark patch — closing can produce a blob that looks
+    locally similar to a small coral fragment. The density and aspect filter
+    in Stage 4 is our primary way to mitigate this tradeoff.
+
+================================================================================
+STAGE 3 — CONNECTED COMPONENTS VIA BFS
+================================================================================
+
+Why we included it:
+    After morphological closing, the binary mask contains many isolated
+    regions of white pixels. We need to group them into discrete blobs so
+    that each blob can be evaluated and either accepted or rejected as a
+    coral piece. BFS (breadth-first search) is the natural algorithm for
+    this: start at any unvisited white pixel, flood-fill all 8-connected
+    neighbors, and record the full extent of the region.
+
+What it tracks per blob:
+    - area: total pixel count — used in the area filter (Stage 5)
+    - minX, maxX, minY, maxY: bounding box corners — used to compute the
+      density and aspect ratio in Stage 4, and to draw the output rectangle
+
+Why 8-connectivity instead of 4:
+    Coral fragments are organic and diagonal connections are common. Using
+    only 4-connectivity (up/down/left/right) would incorrectly split blobs
+    that touch diagonally, producing more fragments than actual coral pieces.
+
+================================================================================
+STAGE 4 — DENSITY AND ASPECT RATIO FILTER
+================================================================================
+
+Why we included it:
+    Even after color thresholding and morphological closing, the binary mask
+    still contains blobs from mesh strands and intersection nodes. The mesh's
+    color passes the warm-dark threshold in some lighting conditions. We
+    needed a shape-based filter that exploits the structural difference
+    between coral (compact, blobby) and mesh (thin, elongated strands).
+
+Density:
+    density = blob.area / (bounding_box_width × bounding_box_height)
+
+    A compact coral fragment fills most of its bounding box → density ≈ 1.0.
+    A thin mesh strand spans a large bounding box but leaves most of it
+    empty → density ≈ 0.05–0.15.
+
+Aspect ratio:
+    aspect = bounding_box_width / bounding_box_height
+
+    A roughly blobby coral piece has aspect near 1.0. A horizontal mesh
+    strand is much wider than tall → aspect > 3.0. A vertical mesh strand
+    is much taller than wide → aspect < 0.5 (i.e., 1/aspect > 3.0 in that
+    direction).
+
+The filter logic:
+    Discard a blob only if BOTH conditions fail simultaneously:
+        density < 0.5  AND  (aspect > 3.0 OR aspect < 0.5)
+
+    This is intentionally conservative. A blob is kept if it is either
+    dense enough OR not elongated enough. This prevents the filter from
+    accidentally discarding small but legitimate coral fragments that happen
+    to have an elongated bounding box (e.g., a branching arm of coral).
+    The cost is that squarish mesh nodes — which are dense-ish and not
+    elongated — can still pass. The area filter in Stage 5 is a second
+    line of defense against those.
+
+================================================================================
+STAGE 5 — AREA FILTER  (minArea / maxArea)
+================================================================================
+
+Why we included it:
+    Two categories of false positives survive Stage 4:
+        1. Very small blobs: isolated noise pixels, tiny mesh shadow patches,
+           or single-pixel artifacts from the color threshold. These have
+           areas too small to be a real coral fragment.
+        2. Very large blobs: regions where morphological closing fused
+           multiple coral pieces (or coral + mesh) into one giant connected
+           component. These are too large to be a single fragment.
+
+    A two-sided area gate [minArea, maxArea] removes both.
+
+How parameters were chosen (from Results.txt):
+    Run #1 used minArea=50, maxArea=10000. This captured fragments ranging
+    from small pieces (~50–200 px²) up to large clusters (~2000–2500 px²).
+    Subsequent runs tuned these bounds based on visual inspection of which
+    detections were genuine coral vs. noise or mesh artifacts.
+
+================================================================================
+STAGE 6 — OUTPUT DRAWING
+================================================================================
+
+Why rectangles instead of circles:
+    The Hough pipeline drew circles — which were wrong for irregular coral
+    shapes. We replaced circles with axis-aligned bounding rectangles plus
+    a center dot. The rectangle communicates the actual spatial extent of
+    the detected blob without implying any particular geometric shape,
+    which is more honest about what the algorithm actually found.
+
+================================================================================
+SUMMARY OF DESIGN RATIONALE
+================================================================================
+
+  Stage         Solves
+  ------------- -----------------------------------------------------------------
+  Color thresh  Removes background and water; targets coral's dark warm tone
+  Sat. guard    Excludes brightly colored identification tags on coral pieces
+  Closing       Heals interior gaps so one coral fragment registers as one blob
+  BFS           Groups pixels into discrete, evaluable regions
+  Density       Rejects thin, elongated mesh strands
+  Aspect        Reinforces density: catches elongated blobs even if moderately dense
+  Area filter   Removes noise (too small) and fused mega-blobs (too large)
+  Rectangles    Honest representation of irregular blob extent

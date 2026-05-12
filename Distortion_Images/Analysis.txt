@@ -1,14 +1,60 @@
 SAMPLE IMAGE SOURCE: https://github.com/opencv/opencv/tree/master/samples/data
 
-Images sourced:
+Images sourced (from the GitHub):
 - https://github.com/opencv/opencv/blob/master/samples/data/butterfly.jpg
 - https://github.com/opencv/opencv/blob/master/samples/data/starry_night.jpg
 - https://github.com/opencv/opencv/blob/master/samples/data/notes.png
 
+Images sourced (not from GitHub):
+- https://www.travelandleisure.com/thmb/NxtZwejIxr9w11YXRBJ4ux-hP9w=/1500x0/filters:no_upscale():max_bytes(150000):strip_icc()/paris-france_CITYBEAUTY1222-9c0625d15d444eaea7f1a91fce702847.jpg
+- https://media.cntravellerme.com/photos/647f6126d49d9911e8a60b03/16:9/w_4240,h_2385,c_limit/BestCitiesInTheWorld-2020-Bergen,%20Norway-GettyImages-1169113458.jpg
+
+
 We converted all sourced images to .ppm before use.
 
-These were the distortions applied:
-- Butterfly -> Low contrast distortion.
-- Starry Night -> Gaussian noise.
-- Notes -> Box blur.
+These were the distortions applied (we'll just talk about the ones that we used for presentation):
+- Houses -> Low-contrast noise -> Gaussian filter.
+- Eiffel Tower -> Guassian noise -> Sobel / Canny. 
+- Starry Night -> Gaussian noise -> Texture segmentation.
 
+Since this commentary primarily focuses on Sobel and Canny results + Texture Segmentation results, we'll briefly mention what we observed for the other distortion.
+
+For the houses, we applied a low-contrast Gaussian filter. We found that the filter still worked 
+well despite the noise, as the edges were blurred uniformly.
+
+Moving on to the Eiffel Tower:
+
+SOBEL
+
+- Edge Quality
+    Sobel only produces much higher overall intensity compared to Guassian + Sobel.
+    The edges are much brighter, and easier to view,
+    
+- Continuity
+    Both are rather comparable in continuity too. I don't notice too much of difference with or without the Gaussian filter.
+    This may just be due to the fact that the original image was very high in contrast, so filter or no filter, the edge detection
+    was still set up to work well.
+
+- Noise Sensitivity
+    Once again, both are not very sensitive to noise in the image. That being said, the original image already had heavy
+    preprocessing, so our blurring may not have had as much of an effect as it was mitigated by the quality of the editing.
+
+CANNY
+
+- Edge Quality
+    The edges are very similar in quality. Just Canny alone produces very thin and shaky edges (though not significantly, just in
+    comparison).
+
+- Continuity
+    With the filter, there is a clear difference in continuity. You can see that the upper right tree leaves are able to be detected,
+    whereas without the filter, they are absent.
+
+- Noise Sensitivity
+    The Eiffel Tower edges were much less noisy with the filter (you can look at the peak of the tower and see that along the edges,
+    there are less stray lines being drawn).
+
+Moving on to Starry Night Painting:
+
+    Image segmentation was definitely impacted by Gaussian noise. This is because adding noise can simulate adding/changing
+    textures in the image, and this is very visible in the results. The boundaries between different textures weakens in the
+    image, resulting in the painting's feature distributions overlapping more.

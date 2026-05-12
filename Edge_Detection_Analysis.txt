@@ -1,0 +1,192 @@
+================================================================================
+EDGE DETECTOR PERFORMANCE EVALUATION
+PreserVision — Coral Nursery Detection Pipeline
+================================================================================
+
+BACKGROUND (from cv08 lecture)
+--------------------------------------------------------------------------------
+Edge detection converts a 2D image into curves that mark object boundaries.
+An edge is a location where image intensity changes rapidly. In practice this
+means computing the image gradient — the 2D derivative that gives both the
+strength (magnitude) and direction of the sharpest brightness change at each
+pixel.
+
+The core challenge is noise: differentiation amplifies it. The lecture's
+recommended solution is to smooth first (Gaussian), then differentiate — or
+equivalently, convolve with a derivative-of-Gaussian filter. Sobel already
+bakes limited smoothing into its kernel. Canny adds non-maxima suppression and
+hysteresis thresholding on top to produce one-pixel-wide, well-localized edges.
+
+The evaluation below compares three detectors applied to our coral nursery
+pipeline context: Roberts Cross, Sobel, and Canny.
+
+================================================================================
+1. SOBEL FILTER  (sobel.c)
+================================================================================
+
+Kernels:
+    Gx = [[ 1, 0, -1],      Gy = [[ 1,  2,  1],
+           [ 2, 0, -2],            [ 0,  0,  0],
+           [ 1, 0, -1]]            [-1, -2, -1]]
+
+Pipeline: grayscale → Gx convolution + Gy convolution → magnitude = sqrt(Gx²+Gy²)
+
+Strengths:
+  - The built-in smoothing reduces the noise amplification that the lecture
+    flags.
+  - Captures both horizontal (Gy) and vertical (Gx) edges, giving full
+    coverage of the mesh grid and coral boundaries.
+  - Produces a continuous gradient magnitude map, making it suitable for
+    feeding into a threshold or the Hough accumulator.
+
+Weaknesses for our application:
+  - Outputs thick, multi-pixel-wide outlines. The lecture notes that
+    thresholding Sobel output "does not always produce clean, one-pixel-wide
+    edges". 
+  - The mesh strands and the coral fragment boundaries produce similar gradient
+    magnitudes, since both are dark-on-light boundaries. A fixed threshold
+    cannot cleanly separate them.
+
+Observed behavior on coral_nursery_sobel.ppm:
+  - Strong responses on coral fragment outlines.
+  - Equally strong responses along every mesh wire too though.
+  - Internal coral texture plus the white plate artifacts also produce mid-strength edges, contributing
+    to small, unconnected components (basically noise) being detected.
+  - When applied to the mesh grid's straight horizontal and
+    vertical wires produced edges, but the rounded mesh-cell corners voted
+    for circles and misled the accumulator.
+
+Improvement used in our pipeline:
+    Applying a Gaussian blur before Sobel (visible in
+    Distortion_Images/Sobel_Images/After_Gaussian/) reduced noise and
+    weakened the response on mesh texture while preserving the stronger
+    coral boundary edges.
+
+Measured edge pixel density on coral_nursery.ppm (4000×3000 = 12M pixels):
+
+    Sobel (no blur), gradient threshold:
+        > 20  : 1,211,853 pixels  (10.1%)   ← almost every boundary fires
+        > 50  :   343,449 pixels   (2.9%)
+        > 100 :    62,492 pixels   (0.5%)
+        > 128 :    24,402 pixels   (0.2%)   ← Hough's own cutoff (edgeMatrix >= 128)
+
+    Sobel + Gaussian blur (7×7, σ=1.4), same thresholds:
+        > 20  : 1,020,020 pixels   (8.5%)   ← marginal reduction at low end
+        > 50  :   243,598 pixels   (2.0%)
+        > 100 :    34,807 pixels   (0.3%)
+        > 128 :    18,079 pixels   (0.2%)   ← slight improvement at the Hough cutoff
+
+    Insight: at a threshold of 128 (which the Hough accumulator uses),
+    Sobel alone and Sobel + Gaussian produce nearly the same edge count.
+    The blur helps at the intermediate thresholds but has limited effect on
+    only the very strongest responses. The multi-pixel-wide gradient ridges
+    mean many pixels near the true edge peak still clear 128.
+
+================================================================================
+2. CANNY EDGE DETECTOR  (canny.c)
+================================================================================
+
+Pipeline:
+    1. Gradient computation — uses Roberts-style 2×2 diagonal kernels P and Q
+       (as implemented) to compute gradient components.
+    2. Gradient magnitude and orientation.
+    3. Sector quantization — maps orientation to one of 4 sectors (0°, 45°,
+       90°, 135°) to determine which neighbors to compare.
+    4. Non-maxima suppression (NMS) — for each pixel, compare to its two
+       neighbors along the gradient direction. Keep only local maxima.
+       This thins edges to one pixel wide.
+    5. Hysteresis thresholding — pixels above highThreshold are confirmed
+       edges; pixels between lowThreshold and highThreshold are kept only if
+       adjacent to a confirmed edge. Pixels below lowThreshold are discarded.
+
+How it addresses the lecture's critique of Sobel:
+    The lecture states that Sobel alone does not localize edges to one pixel
+    and that finding gradient maxima is needed. Canny's NMS step does exactly
+    that. Hysteresis then uses two thresholds instead of one to suppress weak
+    isolated noise responses while preserving weak edges that form part of a
+    real contour.
+
+Strengths for our application:
+  - NMS produces one-pixel-wide edge contours. The mesh wires, which Sobel
+    rendered as thick bands, become thin single-pixel lines, which are easier to
+    suppress in downstream filtering.
+  - Hysteresis is particularly valuable: the isolated noise specks fall below
+    the low threshold and are discarded, while coral fragment boundaries that
+    have some weaker sections are still kept because they connect to strong
+    edge pixels. This matches the structure of real coral fragments, which
+    have varying boundary contrast.
+  - The two-threshold design gives more tuning flexibility than Sobel's single
+    magnitude cutoff.
+
+Weaknesses for our application:
+  - Our implementation's gradient stage uses 2×2 Roberts-style kernels
+    (P and Q) rather than Sobel 3×3 kernels. This
+    means the gradient computation itself has no smoothing built in — it shares
+    Roberts' noise sensitivity. The lecture recommends smoothing before
+    differentiation; a Gaussian blur before cannyEdgeDetection() is thus
+    important (demonstrated in Distortion_Images/Canny_Images/After_Gaussian/).
+  - Hysteresis thresholding in our implementation is a single forward scan.
+    A fully correct Canny uses a flood-fill /
+    BFS from confirmed edge pixels to propagate to all connected candidates,
+    not just immediately adjacent ones in scan order. Our scan-order pass may
+    miss candidates that connect to a confirmed edge only via a path that
+    travels "upward" (i.e., a candidate whose confirming
+    neighbor comes after it in the scan). This can break contours in complex
+    scenes like the coral nursery.
+  - Same gradient-magnitude ambiguity as Sobel: mesh and coral produce similar
+    magnitudes. Canny's NMS and hysteresis reduce false edges but do not
+    eliminate them entirely.
+
+Observed behavior on coral_nursery_blurred_canny.ppm:
+  - With a Gaussian pre-blur: cleaner, thinner edges on coral boundaries.
+    Many small mesh-texture edges suppressed by hysteresis.
+  - Without pre-blur: noisy response similar in density to Roberts, defeating
+    the purpose of NMS.
+
+Measured edge pixel density on coral_nursery.ppm (Gaussian 7×7 σ=1.4 pre-blur):
+
+    Canny low=20, high=60  :   13,976 pixels  (0.1%)  →   0 circles detected
+    Canny low=10, high=40  :   28,957 pixels  (0.2%)  →  29 circles detected
+    Canny low= 5, high=20  :  145,746 pixels  (1.2%)  → 840 circles detected
+
+    The Hough accumulator threshold in the run above was 30% arc coverage.
+    At low=10 / high=40, Canny + blur produces 0.2% edge density and a
+    manageable 29 detections: comparable absolute count to Sobel at >=128,
+    but the edges are one pixel wide (NMS), which means the votes are more
+    concentrated and the accumulator peaks are sharper.
+
+    At loose thresholds (low=5, high=20), edge density jumps to 1.2% and
+    the accumulator produces 840 circles, almost all false positives from
+    the mesh grid's rounded corners voting as circles (see our image as reference 
+    in coral_nursery_hough.ppm).
+
+================================================================================
+COMPARATIVE SUMMARY  (coral_nursery.ppm, 4000×3000 = 12M pixels)
+================================================================================
+
+All measurements run on coral_nursery.ppm. Hough accumulator threshold = 30%
+arc coverage, radius range 10–60 px. Edge pixel counts use the Hough's own
+cutoff of >= 128 so comparisons are apples-to-apples.
+
+  Detector                  Edge pixels   % of image   Circles detected
+  ------------------------  -----------   ----------   ----------------
+  Sobel (no blur)             24,402        0.2%        (not fed to Hough)
+  Sobel + Gaussian blur       18,079        0.2%        (not fed to Hough)
+  Canny + blur (low=5,hi=20) 145,746        1.2%              840
+  Canny + blur (low=10,hi=40) 28,957        0.2%               29
+  Canny + blur (low=20,hi=60) 13,976        0.1%                0
+
+  Sobel at lower thresholds (not usable by Hough directly):
+      > 20  : 10.1%  — almost every dark boundary fires
+      > 50  :  2.9%
+      > 100 :  0.5%
+
+Key finding: at the Hough's >= 128 cutoff, Sobel and the best Canny setting
+(low=10, high=40) produce nearly identical raw edge counts (~0.2%). The
+difference is edge geometry: Sobel's 0.2% are the peak pixels of multi-pixel-
+wide ridges, while Canny's 0.2% are single-pixel-wide localized maxima. Sharper
+peaks → more concentrated Hough votes → cleaner accumulator.
+
+Canny threshold sensitivity is high. Going from low=10/high=40 (29 circles)
+to low=5/high=20 (840 circles) shows how quickly the accumulator floods when
+weak mesh edges are included. Threshold selection is the critical tuning step.
